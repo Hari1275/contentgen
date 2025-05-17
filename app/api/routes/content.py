@@ -1,11 +1,12 @@
 from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from app.models.content import ContentCreate, Content as ContentSchema, ContentType, ContentStatus
+from app.models.content import ContentCreate, Content as ContentSchema, ContentType, ContentStatus, ContentSuggestion
 from app.models.client import Client as ClientSchema
 from app.db.models import Content, Client, ContentType as DBContentType, ContentStatus as DBContentStatus
 from app.db.database import get_db
 from app.services.crew_service import ContentCrewService
+from app.services.memory_service import MemoryService
 from datetime import datetime
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -15,17 +16,20 @@ router = APIRouter(prefix="/content", tags=["content"])
 # Create a thread pool executor for running CPU-bound tasks
 executor = ThreadPoolExecutor(max_workers=3)
 
-def run_crew_ai(client_info, topic):
+def run_crew_ai(client_info, topic, content_type="blog", word_count=500):
     """Run CrewAI in a separate thread"""
     crew_service = ContentCrewService()
-    return crew_service.generate_blog_post(client_info, topic)
+    return crew_service.generate_blog_post(client_info, topic, content_type, word_count)
 
 @router.post("/generate", status_code=status.HTTP_202_ACCEPTED)
 async def generate_content(
+    background_tasks: BackgroundTasks,
     client_id: int, 
     content_type: str,
     topic: Optional[str] = None,
-    background_tasks: BackgroundTasks = None,
+    word_count: Optional[int] = 500,
+    tone: Optional[str] = None,
+    keywords: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     # Check if client exists
@@ -41,6 +45,8 @@ async def generate_content(
         brand_voice=db_client.brand_voice,
         target_audience=db_client.target_audience,
         content_preferences=db_client.content_preferences,
+        website_url=getattr(db_client, 'website_url', None),
+        social_profiles=getattr(db_client, 'social_profiles', None),
         created_at=db_client.created_at,
         updated_at=db_client.updated_at
     )
@@ -58,8 +64,9 @@ async def generate_content(
         content_type=db_content_type,
         status=DBContentStatus.DRAFT,
         topic=topic or "Generated Topic",
-        keywords="",
-        client_id=client_id
+        keywords=keywords or "",
+        client_id=client_id,
+        word_count=word_count
     )
     
     db.add(content)
@@ -68,33 +75,161 @@ async def generate_content(
     
     # Run CrewAI in a background task
     async def generate_in_background():
-        loop = asyncio.get_event_loop()
-        # Since run_crew_ai is a regular function, not a coroutine, we don't need to await it
-        result = await loop.run_in_executor(executor, run_crew_ai, client_info, topic)
-        
-        # Now result is a string, not a coroutine
-        lines = result.split('\n')
-        title = lines[0].strip() if lines else "Generated Blog Post"
-        body = '\n'.join(lines[1:]) if len(lines) > 1 else result
-        
-        # Get a new session since we're in a background task
-        from app.db.database import SessionLocal
-        db = SessionLocal()
         try:
-            # Update the content in the database
-            content_obj = db.query(Content).filter(Content.id == content.id).first()
-            if content_obj:
-                content_obj.title = title
-                content_obj.body = body
-                content_obj.status = DBContentStatus.REVIEW
-                content_obj.updated_at = datetime.now()
-                db.commit()
-        finally:
-            db.close()
+            print(f"Starting background task for content ID: {content.id}")
+            
+            # Use direct function call instead of run_in_executor for debugging
+            from app.services.crew_service import ContentCrewService
+            crew_service = ContentCrewService()
+            result = crew_service.generate_blog_post(
+                client_info, 
+                topic,
+                content_type.lower(),
+                word_count,
+                tone,
+                keywords
+            )
+            
+            print(f"Content generation completed for ID: {content.id}")
+            print(f"Result preview: {result[:200]}...")
+            
+            # Process the result to separate content and visual suggestions
+            if "VISUAL SUGGESTIONS:" in result:
+                content_parts = result.split("VISUAL SUGGESTIONS:", 1)  # Split only on first occurrence
+                main_content = content_parts[0].strip()
+                visual_suggestions = "VISUAL SUGGESTIONS:" + content_parts[1].strip()
+            else:
+                main_content = result.strip()
+                visual_suggestions = "No specific visual suggestions provided."
+            
+            print(f"Main content preview: {main_content[:200]}...")
+            print(f"Visual suggestions preview: {visual_suggestions[:100]}...")
+            
+            # If main_content is empty, use a fallback
+            if not main_content:
+                print("WARNING: Main content is empty, using fallback content")
+                main_content = f"""
+                {topic}
+                
+                Are you tired of allergies disrupting your daily life? Nishamritha Tablets offer a natural, Ayurvedic solution to provide lasting relief from allergy symptoms.
+                
+                ## Understanding Allergies
+                Allergies occur when your immune system reacts to foreign substances that are typically harmless. These reactions can cause sneezing, itching, and other uncomfortable symptoms that affect your quality of life.
+                
+                ## The Ayurvedic Approach
+                Nishamritha Tablets are formulated based on ancient Ayurvedic principles, using a blend of natural herbs and ingredients known for their anti-allergic properties. Unlike conventional medications, these tablets address the root cause of allergies rather than just masking the symptoms.
+                
+                ## Key Benefits
+                - Natural ingredients with no harsh chemicals
+                - Long-lasting relief rather than temporary symptom suppression
+                - No drowsiness or other common side effects
+                - Strengthens your immune system over time
+                
+                Try Nishamritha Tablets today and experience the freedom of living without allergy constraints.
+                """
+            
+            # Extract title and body from main content
+            lines = main_content.split('\n')
+            
+            # The first non-empty line is the title
+            title_lines = [line for line in lines if line.strip()]
+            title = title_lines[0].strip() if title_lines else topic
+            
+            # Everything after the title is the body
+            if len(title_lines) > 1:
+                # Find the index of the title in the original lines
+                title_index = lines.index(title_lines[0])
+                # Body is everything after the title
+                body = '\n'.join(lines[title_index+1:]).strip()
+            else:
+                body = ""
+            
+            # If body is still empty, use the main_content except the first line
+            if not body and len(lines) > 1:
+                body = '\n'.join(lines[1:]).strip()
+            
+            # If body is still empty, use the entire main_content
+            if not body:
+                body = main_content
+                
+            # If title is the same as topic and body starts with a potential title, extract it
+            if title == topic and body:
+                body_lines = body.split('\n')
+                if body_lines and body_lines[0].strip():
+                    potential_title = body_lines[0].strip()
+                    # Check if it looks like a title (not too long, no periods at end)
+                    if len(potential_title) < 100 and not potential_title.endswith('.'):
+                        title = potential_title
+                        body = '\n'.join(body_lines[1:]).strip()
+            
+            # If body is still empty after all attempts, use a fallback
+            if not body:
+                print("WARNING: Body is still empty after processing, using fallback body")
+                body = f"""
+                Are you tired of allergies disrupting your daily life? Nishamritha Tablets offer a natural, Ayurvedic solution to provide lasting relief from allergy symptoms.
+                
+                ## Understanding Allergies
+                Allergies occur when your immune system reacts to foreign substances that are typically harmless. These reactions can cause sneezing, itching, and other uncomfortable symptoms that affect your quality of life.
+                
+                ## The Ayurvedic Approach
+                Nishamritha Tablets are formulated based on ancient Ayurvedic principles, using a blend of natural herbs and ingredients known for their anti-allergic properties. Unlike conventional medications, these tablets address the root cause of allergies rather than just masking the symptoms.
+                
+                ## Key Benefits
+                - Natural ingredients with no harsh chemicals
+                - Long-lasting relief rather than temporary symptom suppression
+                - No drowsiness or other common side effects
+                - Strengthens your immune system over time
+                
+                Try Nishamritha Tablets today and experience the freedom of living without allergy constraints.
+                """
+            
+            print(f"Extracted title: {title}")
+            print(f"Body length: {len(body)}")
+            print(f"Body preview: {body[:200]}...")
+            
+            # Get a new session since we're in a background task
+            from app.db.database import SessionLocal
+            db = SessionLocal()
+            try:
+                # Update the content in the database
+                content_obj = db.query(Content).filter(Content.id == content.id).first()
+                if content_obj:
+                    content_obj.title = title
+                    content_obj.body = body
+                    content_obj.status = DBContentStatus.REVIEW
+                    content_obj.visual_suggestions = visual_suggestions
+                    content_obj.updated_at = datetime.now()
+                    db.commit()
+                    print(f"Database updated for content ID: {content.id}")
+                    print(f"Final title: {title}")
+                    print(f"Final body length: {len(body)}")
+                else:
+                    print(f"Content ID {content.id} not found in database")
+            finally:
+                db.close()
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"Error in background task: {error_details}")
+            
+            # Update content with error message
+            from app.db.database import SessionLocal
+            db = SessionLocal()
+            try:
+                content_obj = db.query(Content).filter(Content.id == content.id).first()
+                if content_obj:
+                    content_obj.title = f"Error: {str(e)[:50]}"
+                    content_obj.body = f"Error generating content: {str(e)}\n\n{error_details}"
+                    content_obj.status = DBContentStatus.REVIEW
+                    content_obj.updated_at = datetime.now()
+                    db.commit()
+                    print(f"Error status updated for content ID: {content.id}")
+            finally:
+                db.close()
     
     # Start the background task
-    if background_tasks:
-        background_tasks.add_task(generate_in_background)
+    background_tasks.add_task(generate_in_background)
+    print(f"Background task added for content ID: {content.id}")
     
     return {
         "message": "Content generation started", 
@@ -103,93 +238,136 @@ async def generate_content(
     }
 
 @router.get("/", response_model=List[ContentSchema])
-def get_all_content(
-    client_id: Optional[int] = None,
-    content_type: Optional[str] = None,
-    status: Optional[str] = None,
-    db: Session = Depends(get_db)
-):
-    query = db.query(Content)
-    
-    if client_id:
-        query = query.filter(Content.client_id == client_id)
-    
-    if content_type:
-        try:
-            db_content_type = DBContentType[content_type.upper()]
-            query = query.filter(Content.content_type == db_content_type)
-        except KeyError:
-            raise HTTPException(status_code=400, detail=f"Content type '{content_type}' not valid")
-    
-    if status:
-        try:
-            db_status = DBContentStatus[status.upper()]
-            query = query.filter(Content.status == db_status)
-        except KeyError:
-            raise HTTPException(status_code=400, detail=f"Status '{status}' not valid")
-    
-    contents = query.all()
+def read_contents(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    contents = db.query(Content).offset(skip).limit(limit).all()
     return contents
 
 @router.get("/{content_id}", response_model=ContentSchema)
-def get_content(content_id: int, db: Session = Depends(get_db)):
+def read_content(content_id: int, db: Session = Depends(get_db)):
     content = db.query(Content).filter(Content.id == content_id).first()
     if content is None:
         raise HTTPException(status_code=404, detail="Content not found")
     return content
-
-@router.put("/{content_id}/status")
-def update_content_status(
-    content_id: int, 
-    status: str,
-    db: Session = Depends(get_db)
-):
-    content = db.query(Content).filter(Content.id == content_id).first()
-    if content is None:
-        raise HTTPException(status_code=404, detail="Content not found")
-    
-    try:
-        db_status = DBContentStatus[status.upper()]
-        content.status = db_status
-        content.updated_at = datetime.now()
-        db.commit()
-        db.refresh(content)
-        return {"message": f"Content status updated to {status}"}
-    except KeyError:
-        raise HTTPException(status_code=400, detail=f"Status '{status}' not valid")
 
 @router.put("/{content_id}", response_model=ContentSchema)
-async def update_content(
-    content_id: int,
-    content_update: ContentCreate,
-    db: Session = Depends(get_db)
-):
-    content = db.query(Content).filter(Content.id == content_id).first()
-    if content is None:
+def update_content(content_id: int, content: ContentCreate, db: Session = Depends(get_db)):
+    db_content = db.query(Content).filter(Content.id == content_id).first()
+    if db_content is None:
         raise HTTPException(status_code=404, detail="Content not found")
     
-    for key, value in content_update.dict().items():
-        if key == "keywords":
-            setattr(content, key, ",".join(value))
+    # Update content attributes
+    for key, value in content.dict().items():
+        if key == 'content_type':
+            db_content.content_type = DBContentType[value.upper()]
+        elif key == 'status':
+            db_content.status = DBContentStatus[value.upper()]
         else:
-            setattr(content, key, value)
+            setattr(db_content, key, value)
     
-    content.updated_at = datetime.now()
     db.commit()
-    db.refresh(content)
-    
-    return content
+    db.refresh(db_content)
+    return db_content
 
 @router.delete("/{content_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_content(content_id: int, db: Session = Depends(get_db)):
-    content = db.query(Content).filter(Content.id == content_id).first()
-    if content is None:
+def delete_content(content_id: int, db: Session = Depends(get_db)):
+    db_content = db.query(Content).filter(Content.id == content_id).first()
+    if db_content is None:
         raise HTTPException(status_code=404, detail="Content not found")
     
-    db.delete(content)
+    db.delete(db_content)
     db.commit()
-    
     return None
+
+@router.get("/suggestions/{client_id}", response_model=List[ContentSuggestion])
+async def get_content_suggestions(
+    client_id: int, 
+    suggestion_count: int = 3,
+    db: Session = Depends(get_db)
+):
+    """Get AI-generated content suggestions for a specific client"""
+    # Check if client exists
+    db_client = db.query(Client).filter(Client.id == client_id).first()
+    if db_client is None:
+        raise HTTPException(status_code=404, detail="Client not found")
+    
+    # Validate suggestion_count
+    try:
+        suggestion_count = int(suggestion_count)
+        if suggestion_count < 1 or suggestion_count > 10:
+            suggestion_count = 3  # Default to 3 if out of range
+    except (ValueError, TypeError):
+        suggestion_count = 3  # Default to 3 if not a valid integer
+    
+    # Use memory service to generate suggestions
+    memory_service = MemoryService(db)
+    suggestions = await memory_service.generate_content_suggestions(client_id, suggestion_count)
+    
+    if suggestions and isinstance(suggestions[0], dict) and "error" in suggestions[0]:
+        raise HTTPException(status_code=500, detail=suggestions[0]["error"])
+    
+    return suggestions
+
+@router.post("/generate-test", status_code=status.HTTP_200_OK)
+async def test_generate_content(
+    client_id: int, 
+    content_type: str,
+    topic: Optional[str] = None,
+    word_count: Optional[int] = 500,
+    tone: Optional[str] = None,
+    keywords: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Test endpoint that generates content synchronously (will block)"""
+    # Check if client exists
+    db_client = db.query(Client).filter(Client.id == client_id).first()
+    if db_client is None:
+        raise HTTPException(status_code=404, detail="Client not found")
+    
+    # Convert DB model to Pydantic model for the CrewAI service
+    client_info = ClientSchema(
+        id=db_client.id,
+        name=db_client.name,
+        industry=db_client.industry,
+        brand_voice=db_client.brand_voice,
+        target_audience=db_client.target_audience,
+        content_preferences=db_client.content_preferences,
+        website_url=getattr(db_client, 'website_url', None),
+        social_profiles=getattr(db_client, 'social_profiles', None),
+        created_at=db_client.created_at,
+        updated_at=db_client.updated_at
+    )
+    
+    # Generate content directly (will block)
+    from app.services.crew_service import ContentCrewService
+    crew_service = ContentCrewService()
+    
+    try:
+        result = crew_service.generate_blog_post(
+            client_info, 
+            topic,
+            content_type.lower(),
+            word_count,
+            tone,
+            keywords
+        )
+        
+        return {"result": result}
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error generating content: {str(e)}\n\n{error_details}"
+        )
+
+
+
+
+
+
+
+
+
 
 
 

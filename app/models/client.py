@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Dict, Any, Optional, Union
 from datetime import datetime
 
 class ClientBase(BaseModel):
@@ -7,7 +7,9 @@ class ClientBase(BaseModel):
     industry: str
     brand_voice: str
     target_audience: str
-    content_preferences: Optional[str] = None
+    website_url: Optional[str] = None
+    social_profiles: Optional[Dict[str, str]] = None
+    content_preferences: Optional[Union[Dict[str, Any], str]] = None
 
 class ClientCreate(ClientBase):
     pass
@@ -18,4 +20,8 @@ class Client(ClientBase):
     updated_at: datetime
 
     class Config:
-        from_attributes = True
+        from_attributes = True  # Updated from orm_mode
+
+
+
+

@@ -1,36 +1,38 @@
 from fastapi import FastAPI
+from app.api.api import api_router
+from app.core.config import settings
+from app.db.init_db import init_db
+import os
 from fastapi.middleware.cors import CORSMiddleware
-import uvicorn
 
-from app.api.routes import clients, content
-from app.db.database import engine
-from app.db.models import Base
-
-# Create database tables
-Base.metadata.create_all(bind=engine)
+# Create data directory if it doesn't exist
+os.makedirs("./data", exist_ok=True)
 
 app = FastAPI(
-    title="Content Creation Platform",
-    description="AI-powered content creation for multiple client agencies",
-    version="0.1.0"
+    title=settings.PROJECT_NAME,
+    openapi_url=f"{settings.API_V1_STR}/openapi.json"
 )
 
-# Add CORS middleware
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include routers
-app.include_router(clients.router)
-app.include_router(content.router)
+# Include API router
+app.include_router(api_router, prefix=settings.API_V1_STR)
+
+# Initialize database on startup
+@app.on_event("startup")
+def startup_event():
+    init_db()
 
 @app.get("/")
-async def root():
-    return {"message": "Welcome to the Content Creation Platform API"}
+def read_root():
+    return {"message": "Welcome to Smart AI Content Generator API"}
 
-if __name__ == "__main__":
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+
+
