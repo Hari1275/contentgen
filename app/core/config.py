@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     # CORS settings
     CORS_ORIGINS: List[str] = ["*"]
     
-    # API Keys
+    # API Keys - Use regular string for simplicity
     GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY")
     
     # Print environment variables for debugging
@@ -38,10 +38,14 @@ class Settings(BaseSettings):
             except Exception as e:
                 print(f"ERROR: GEMINI_API_KEY is set but not working: {str(e)}")
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8"
+    }
 
 settings = Settings()
+
+
+
 
 

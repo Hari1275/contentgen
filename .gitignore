@@ -27,6 +27,8 @@ var/
 # Virtual environments
 .venv/
 venv/
+.fresh_venv
+fresh_venv
 ENV/
 my-next-base/
 my-next-base/node_modules/

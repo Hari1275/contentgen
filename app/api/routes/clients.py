@@ -17,7 +17,9 @@ def create_client(client: ClientCreate, db: Session = Depends(get_db)):
         industry=client.industry,
         brand_voice=client.brand_voice,
         target_audience=client.target_audience,
-        content_preferences=client.content_preferences
+        content_preferences=client.content_preferences,
+        website_url=client.website_url,
+        social_profiles=client.social_profiles
     )
     db.add(db_client)
     db.commit()
@@ -43,7 +45,7 @@ def update_client(client_id: int, client: ClientCreate, db: Session = Depends(ge
         raise HTTPException(status_code=404, detail="Client not found")
     
     # Update client attributes
-    for key, value in client.dict().items():
+    for key, value in client.dict(exclude_unset=True).items():
         setattr(db_client, key, value)
     
     db.commit()
@@ -59,5 +61,7 @@ def delete_client(client_id: int, db: Session = Depends(get_db)):
     db.delete(db_client)
     db.commit()
     return None
+
+
 
 
