@@ -5,6 +5,7 @@ from app.models.content import ContentCreate, Content as ContentSchema, ContentT
 from app.models.client import Client as ClientSchema
 from app.db.models import Content, Client, ContentType as DBContentType, ContentStatus as DBContentStatus
 from app.db.database import get_db
+from app.core.supabase_auth import get_current_active_user, SupabaseUser
 from app.services.crew_service import ContentCrewService
 from app.services.memory_service import MemoryService
 from datetime import datetime
@@ -24,18 +25,23 @@ def run_crew_ai(client_info, topic, content_type="blog", word_count=500):
 @router.post("/generate", status_code=status.HTTP_202_ACCEPTED)
 async def generate_content(
     background_tasks: BackgroundTasks,
-    client_id: int, 
+    client_id: int,
     content_type: str,
     topic: Optional[str] = None,
     word_count: Optional[int] = 500,
     tone: Optional[str] = None,
     keywords: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: SupabaseUser = Depends(get_current_active_user)
 ):
-    # Check if client exists
-    db_client = db.query(Client).filter(Client.id == client_id).first()
+    """Generate content for a client (only if owned by authenticated user)"""
+    # Check if client exists and belongs to the authenticated user
+    db_client = db.query(Client).filter(
+        Client.id == client_id,
+        Client.user_id == current_user.id
+    ).first()
     if db_client is None:
-        raise HTTPException(status_code=404, detail="Client not found")
+        raise HTTPException(status_code=404, detail="Client not found or access denied")
     
     # Convert DB model to Pydantic model for the CrewAI service
     client_info = ClientSchema(
@@ -238,57 +244,215 @@ async def generate_content(
     }
 
 @router.get("/", response_model=List[ContentSchema])
-def read_contents(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    contents = db.query(Content).offset(skip).limit(limit).all()
+def read_contents(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: SupabaseUser = Depends(get_current_active_user)
+):
+    """Get all content for the authenticated user (from their clients only)"""
+    # Get all client IDs that belong to the user
+    user_client_ids = db.query(Client.id).filter(Client.user_id == current_user.id).subquery()
+
+    # Get content only from user's clients
+    contents = db.query(Content).filter(
+        Content.client_id.in_(user_client_ids)
+    ).offset(skip).limit(limit).all()
+
     return contents
 
+@router.get("/client/{client_id}", response_model=List[ContentSchema])
+def get_content_by_client(
+    client_id: int,
+    skip: int = 0,
+    limit: int = 100,
+    status: Optional[str] = None,
+    content_type: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: SupabaseUser = Depends(get_current_active_user)
+):
+    """Get all content for a specific client (only if owned by authenticated user)"""
+    print(f"🔍 Debug: Looking for client {client_id}")
+    print(f"👤 Current user ID: {current_user.id}")
+
+    # First, check if client exists at all
+    client_exists = db.query(Client).filter(Client.id == client_id).first()
+    if not client_exists:
+        print(f"❌ Client {client_id} does not exist in database")
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    print(f"✅ Client {client_id} exists")
+    print(f"📋 Client details: name='{client_exists.name}', user_id='{client_exists.user_id}'")
+
+    # Check if client belongs to the authenticated user
+    if client_exists.user_id != current_user.id:
+        print(f"❌ Access denied: Client belongs to user '{client_exists.user_id}', but current user is '{current_user.id}'")
+        raise HTTPException(status_code=404, detail="Client not found or access denied")
+
+    print(f"✅ User {current_user.id} owns client {client_id}")
+
+    # Check if client exists and belongs to the authenticated user
+    db_client = db.query(Client).filter(
+        Client.id == client_id,
+        Client.user_id == current_user.id
+    ).first()
+    if db_client is None:
+        raise HTTPException(status_code=404, detail="Client not found or access denied")
+
+    # Build query for client's content
+    query = db.query(Content).filter(Content.client_id == client_id)
+
+    # Apply optional filters
+    if status:
+        try:
+            status_enum = DBContentStatus[status.upper()]
+            query = query.filter(Content.status == status_enum)
+        except KeyError:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+
+    if content_type:
+        try:
+            content_type_enum = DBContentType[content_type.upper()]
+            query = query.filter(Content.content_type == content_type_enum)
+        except KeyError:
+            raise HTTPException(status_code=400, detail=f"Invalid content type: {content_type}")
+
+    # Order by most recent first and apply pagination
+    contents = query.order_by(Content.created_at.desc()).offset(skip).limit(limit).all()
+
+    return contents
+
+@router.get("/client/{client_id}/stats")
+def get_client_content_stats(
+    client_id: int,
+    db: Session = Depends(get_db),
+    current_user: SupabaseUser = Depends(get_current_active_user)
+):
+    """Get content statistics for a specific client (only if owned by authenticated user)"""
+    # Check if client exists and belongs to the authenticated user
+    db_client = db.query(Client).filter(
+        Client.id == client_id,
+        Client.user_id == current_user.id
+    ).first()
+    if db_client is None:
+        raise HTTPException(status_code=404, detail="Client not found or access denied")
+
+    # Get total content count
+    total_content = db.query(Content).filter(Content.client_id == client_id).count()
+
+    # Get content by status
+    status_counts = {}
+    for status in DBContentStatus:
+        count = db.query(Content).filter(
+            Content.client_id == client_id,
+            Content.status == status
+        ).count()
+        status_counts[status.value] = count
+
+    # Get content by type
+    type_counts = {}
+    for content_type in DBContentType:
+        count = db.query(Content).filter(
+            Content.client_id == client_id,
+            Content.content_type == content_type
+        ).count()
+        type_counts[content_type.value] = count
+
+    # Get recent content (last 7 days)
+    from datetime import datetime, timedelta
+    seven_days_ago = datetime.now() - timedelta(days=7)
+    recent_content = db.query(Content).filter(
+        Content.client_id == client_id,
+        Content.created_at >= seven_days_ago
+    ).count()
+
+    return {
+        "client_id": client_id,
+        "total_content": total_content,
+        "status_breakdown": status_counts,
+        "type_breakdown": type_counts,
+        "recent_content_7_days": recent_content
+    }
+
 @router.get("/{content_id}", response_model=ContentSchema)
-def read_content(content_id: int, db: Session = Depends(get_db)):
-    content = db.query(Content).filter(Content.id == content_id).first()
+def read_content(
+    content_id: int,
+    db: Session = Depends(get_db),
+    current_user: SupabaseUser = Depends(get_current_active_user)
+):
+    """Get specific content (only if from user's client)"""
+    # Get content and verify it belongs to user's client
+    content = db.query(Content).join(Client).filter(
+        Content.id == content_id,
+        Client.user_id == current_user.id
+    ).first()
     if content is None:
-        raise HTTPException(status_code=404, detail="Content not found")
+        raise HTTPException(status_code=404, detail="Content not found or access denied")
     return content
 
 @router.put("/{content_id}", response_model=ContentSchema)
-def update_content(content_id: int, content: ContentCreate, db: Session = Depends(get_db)):
-    db_content = db.query(Content).filter(Content.id == content_id).first()
+def update_content(
+    content_id: int,
+    content: ContentCreate,
+    db: Session = Depends(get_db),
+    current_user: SupabaseUser = Depends(get_current_active_user)
+):
+    """Update content (only if from user's client)"""
+    # Get content and verify it belongs to user's client
+    db_content = db.query(Content).join(Client).filter(
+        Content.id == content_id,
+        Client.user_id == current_user.id
+    ).first()
     if db_content is None:
-        raise HTTPException(status_code=404, detail="Content not found")
-    
+        raise HTTPException(status_code=404, detail="Content not found or access denied")
+
     # Update content attributes
-    for key, value in content.dict().items():
+    for key, value in content.model_dump().items():
         if key == 'content_type':
             db_content.content_type = DBContentType[value.upper()]
         elif key == 'status':
             db_content.status = DBContentStatus[value.upper()]
         else:
             setattr(db_content, key, value)
-    
+
     db.commit()
     db.refresh(db_content)
     return db_content
 
 @router.delete("/{content_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_content(content_id: int, db: Session = Depends(get_db)):
-    db_content = db.query(Content).filter(Content.id == content_id).first()
+def delete_content(
+    content_id: int,
+    db: Session = Depends(get_db),
+    current_user: SupabaseUser = Depends(get_current_active_user)
+):
+    """Delete content (only if from user's client)"""
+    # Get content and verify it belongs to user's client
+    db_content = db.query(Content).join(Client).filter(
+        Content.id == content_id,
+        Client.user_id == current_user.id
+    ).first()
     if db_content is None:
-        raise HTTPException(status_code=404, detail="Content not found")
-    
+        raise HTTPException(status_code=404, detail="Content not found or access denied")
+
     db.delete(db_content)
     db.commit()
     return None
 
 @router.get("/suggestions/{client_id}", response_model=List[ContentSuggestion])
 async def get_content_suggestions(
-    client_id: int, 
+    client_id: int,
     suggestion_count: int = 3,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: SupabaseUser = Depends(get_current_active_user)
 ):
-    """Get AI-generated content suggestions for a specific client"""
-    # Check if client exists
-    db_client = db.query(Client).filter(Client.id == client_id).first()
+    """Get AI-generated content suggestions for a specific client (only if owned by user)"""
+    # Check if client exists and belongs to the authenticated user
+    db_client = db.query(Client).filter(
+        Client.id == client_id,
+        Client.user_id == current_user.id
+    ).first()
     if db_client is None:
-        raise HTTPException(status_code=404, detail="Client not found")
+        raise HTTPException(status_code=404, detail="Client not found or access denied")
     
     # Validate suggestion_count
     try:
@@ -307,21 +471,71 @@ async def get_content_suggestions(
     
     return suggestions
 
+@router.get("/debug/database-state")
+def debug_database_state(db: Session = Depends(get_db)):
+    """Debug endpoint to check database state"""
+
+    # Check all clients
+    all_clients = db.query(Client).all()
+    print(f"📊 Total clients in database: {len(all_clients)}")
+
+    clients_info = []
+    for client in all_clients:
+        clients_info.append({
+            "id": client.id,
+            "name": client.name,
+            "user_id": getattr(client, 'user_id', 'NO_USER_ID'),
+            "has_user_id": hasattr(client, 'user_id') and client.user_id is not None
+        })
+        print(f"  - Client {client.id}: {client.name}, user_id: {getattr(client, 'user_id', 'NO_USER_ID')}")
+
+    # Check all content
+    all_content = db.query(Content).all()
+    print(f"📊 Total content in database: {len(all_content)}")
+
+    content_info = []
+    for content in all_content:
+        # Check if the client for this content exists
+        client_exists = db.query(Client).filter(Client.id == content.client_id).first()
+        content_info.append({
+            "id": content.id,
+            "title": content.title,
+            "client_id": content.client_id,
+            "client_exists": client_exists is not None,
+            "client_user_id": getattr(client_exists, 'user_id', None) if client_exists else None
+        })
+        print(f"  - Content {content.id}: client_id={content.client_id}, client_exists={client_exists is not None}")
+
+    return {
+        "clients": clients_info,
+        "content": content_info,
+        "summary": {
+            "total_clients": len(all_clients),
+            "total_content": len(all_content),
+            "clients_with_user_id": len([c for c in clients_info if c["has_user_id"]]),
+            "orphaned_content": len([c for c in content_info if not c["client_exists"]])
+        }
+    }
+
 @router.post("/generate-test", status_code=status.HTTP_200_OK)
 async def test_generate_content(
-    client_id: int, 
+    client_id: int,
     content_type: str,
     topic: Optional[str] = None,
     word_count: Optional[int] = 500,
     tone: Optional[str] = None,
     keywords: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: SupabaseUser = Depends(get_current_active_user)
 ):
-    """Test endpoint that generates content synchronously (will block)"""
-    # Check if client exists
-    db_client = db.query(Client).filter(Client.id == client_id).first()
+    """Test endpoint that generates content synchronously (only for user's clients)"""
+    # Check if client exists and belongs to the authenticated user
+    db_client = db.query(Client).filter(
+        Client.id == client_id,
+        Client.user_id == current_user.id
+    ).first()
     if db_client is None:
-        raise HTTPException(status_code=404, detail="Client not found")
+        raise HTTPException(status_code=404, detail="Client not found or access denied")
     
     # Convert DB model to Pydantic model for the CrewAI service
     client_info = ClientSchema(

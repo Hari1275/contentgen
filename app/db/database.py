@@ -2,18 +2,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
-import os
 
-# Create the database directory if it doesn't exist
-os.makedirs("./data", exist_ok=True)
+# Use database URL from settings (Supabase PostgreSQL)
+SQLALCHEMY_DATABASE_URL = settings.DATABASE_URL
 
-# Use SQLite database
-SQLALCHEMY_DATABASE_URL = "sqlite:///./data/app.db"
-
-# Create engine with SQLite-specific parameters
+# Create engine with PostgreSQL/Supabase parameters
 engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, 
-    connect_args={"check_same_thread": False}  # Needed for SQLite
+    SQLALCHEMY_DATABASE_URL,
+    pool_pre_ping=True,  # Verify connections before use
+    pool_recycle=300,    # Recycle connections every 5 minutes
 )
 
 # Create session factory

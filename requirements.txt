@@ -29,5 +29,8 @@ requests==2.31.0
 beautifulsoup4==4.12.2
 tenacity==8.5.0
 
+# Authentication and security (for Supabase JWT verification)
+PyJWT==2.8.0
+
 
 

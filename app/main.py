@@ -2,11 +2,9 @@ from fastapi import FastAPI
 from app.api.api import api_router
 from app.core.config import settings
 from app.db.init_db import init_db
-import os
 from fastapi.middleware.cors import CORSMiddleware
 
-# Create data directory if it doesn't exist
-os.makedirs("./data", exist_ok=True)
+# Using Supabase PostgreSQL - no local data directory needed
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
