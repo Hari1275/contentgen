@@ -44,27 +44,38 @@ class ContentCrewService:
 
         # Define tools for the agents
         tools = []
+        has_website = False
 
-        # Website scraping tool
-        if hasattr(client_info, 'website_url') and client_info.website_url:
+        # Website scraping tool - conditionally add based on client website URL
+        if hasattr(client_info, 'website_url') and client_info.website_url and client_info.website_url.strip():
+            has_website = True
             try:
                 from crewai_tools import ScrapeWebsiteTool
 
                 # Initialize the tool with the website URL
                 scrape_tool = ScrapeWebsiteTool(website_url=client_info.website_url)
                 tools.append(scrape_tool)
-                print(f"Added ScrapeWebsiteTool for URL: {client_info.website_url}")
+                print(f"✅ Website scraping ENABLED - Added ScrapeWebsiteTool for URL: {client_info.website_url}")
+                print("🔍 Content generation will include ingredient/menu information from client website")
             except ImportError:
                 print("Warning: crewai_tools not installed. Falling back to langchain Tool.")
                 from langchain.tools import Tool
 
                 scrape_tool = Tool(
                     name="WebsiteScraper",
-                    description="Scrapes content from a website URL",
+                    description="Scrapes content from a website URL to find ingredient and menu information",
                     func=self._scrape_website
                 )
                 tools.append(scrape_tool)
-                print(f"Added langchain Tool for URL: {client_info.website_url}")
+                print(f"✅ Website scraping ENABLED - Added langchain Tool for URL: {client_info.website_url}")
+                print("🔍 Content generation will include ingredient/menu information from client website")
+        else:
+            print("❌ Website scraping DISABLED - No website URL provided")
+            print("📝 Content generation will proceed with general ingredient knowledge only")
+
+        # Store website availability for use in task descriptions
+        self.has_website_data = has_website
+        self.website_url = client_info.website_url if has_website else None
 
         # Research Agent - Gathers information about the client and industry
         researcher = Agent(
@@ -130,47 +141,7 @@ class ContentCrewService:
 
         return researcher, strategist, writer, designer
 
-    def _scrape_website(self, url):
-        """Tool for the Research Agent to scrape website content"""
-        try:
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-            response = requests.get(url, headers=headers, timeout=10)
-            soup = BeautifulSoup(response.text, 'html.parser')
 
-            # Extract key information
-            title = soup.title.string if soup.title else ""
-
-            # Get meta description
-            meta_desc = ""
-            meta = soup.find('meta', attrs={'name': 'description'})
-            if meta and 'content' in meta.attrs:
-                meta_desc = meta['content']
-
-            # Get main content
-            main_content = ""
-            for tag in ['main', 'article', 'div.content', 'div.main']:
-                content = soup.select(tag)
-                if content:
-                    main_content = " ".join([c.get_text(strip=True) for c in content])
-                    break
-
-            if not main_content and soup.body:
-                main_content = soup.body.get_text(strip=True)
-
-            # Get about section
-            about_section = ""
-            about = soup.select('.about, #about, [id*=about], [class*=about]')
-            if about:
-                about_section = about[0].get_text(strip=True)
-
-            return json.dumps({
-                "title": title,
-                "description": meta_desc,
-                "main_content": main_content[:5000],
-                "about": about_section
-            })
-        except Exception as e:
-            return json.dumps({"error": str(e)})
 
     def _scrape_website(self, url):
         """Fallback method for website scraping when crewai_tools is not available"""
@@ -227,7 +198,24 @@ class ContentCrewService:
             # Create agents with enhanced capabilities
             researcher, strategist, writer, designer = self._create_agents(client_info)
 
-            # Define research task with more specific instructions
+            # Define research task with conditional website scraping instructions
+            website_instruction = ""
+            if self.has_website_data:
+                website_instruction = f"""
+                WEBSITE SCRAPING AVAILABLE: Use the website scraping tool to gather specific ingredient and menu information from: {self.website_url}
+                - Look for ingredient lists, menu items, product descriptions
+                - Extract specific natural ingredients mentioned on the website
+                - Find any health benefits or product claims mentioned
+                - Note the language style used on the website for consistency
+                """
+            else:
+                website_instruction = """
+                NO WEBSITE DATA AVAILABLE: Use your general knowledge of natural ingredients and industry best practices.
+                - Focus on commonly known natural ingredients (turmeric, ginger, honey, green tea, etc.)
+                - Use general health and wellness knowledge for this industry
+                - Apply standard natural product benefits and language
+                """
+
             research_task = Task(
                 description=f"""
                 Research the client's business, industry, and topic thoroughly to inform content creation with focus on customer engagement.
@@ -238,7 +226,7 @@ class ContentCrewService:
                 - Target Audience: {client_info.target_audience}
                 - Brand Voice: {client_info.brand_voice}
 
-                If a website URL is provided, scrape it for information: {getattr(client_info, 'website_url', 'N/A')}
+                {website_instruction}
 
                 Your research should include:
                 1. Current trends in {client_info.industry} related to: {topic}
@@ -439,6 +427,19 @@ class ContentCrewService:
         # Prepare keywords string
         keywords_str = ", ".join(keywords) if keywords and isinstance(keywords, list) else keywords or ""
 
+        # Check if website data is available for ingredient sourcing
+        ingredient_guidance = ""
+        if hasattr(self, 'has_website_data') and self.has_website_data:
+            ingredient_guidance = f"""
+            INGREDIENT SOURCING: Since the client has a website ({self.website_url}), focus on ingredients that would typically be found in their industry.
+            If this is a health/wellness business, emphasize natural ingredients commonly used in such businesses.
+            """
+        else:
+            ingredient_guidance = """
+            INGREDIENT SOURCING: Use general knowledge of natural ingredients commonly known and trusted by consumers.
+            Focus on widely recognized natural ingredients like turmeric, ginger, honey, green tea, aloe vera, etc.
+            """
+
         # Create a direct prompt for content generation
         prompt = f"""
         Create a {word_count}-word {content_type} about "{topic}" for a client in the {client_info.industry} industry using simple, engaging language.
@@ -446,6 +447,8 @@ class ContentCrewService:
         Client details:
         - Brand voice: {client_info.brand_voice}
         - Target audience: {client_info.target_audience}
+
+        {ingredient_guidance}
 
         Content requirements:
         - Use a {tone or "friendly and helpful"} tone
@@ -645,13 +648,37 @@ class ContentCrewService:
 
             # Platform-specific guidance
             platform_guidance = {
-                "instagram": "Create engaging, visual-first content with 1-2 paragraphs and 5-10 relevant hashtags.",
+                "instagram": """Create engaging, visual-first content with 1-2 short paragraphs and 8-15 relevant hashtags.
+                IMPORTANT: Always include hashtags at the end of the post. Use a mix of:
+                - Popular hashtags (#health #wellness #natural)
+                - Niche hashtags (#ayurveda #herbalremedy #naturalhealing)
+                - Branded hashtags (related to the client's brand)
+                - Location hashtags if relevant
+                Format hashtags on separate lines at the end.""",
                 "twitter": "Create concise content under 280 characters with 1-3 relevant hashtags.",
                 "linkedin": "Create professional content with 2-3 paragraphs focusing on industry insights and value.",
-                "facebook": "Create conversational content with 2-3 paragraphs that encourages engagement."
+                "facebook": "Create conversational content with 2-3 paragraphs that encourages engagement.",
+                "social": "Create engaging social media content with 1-2 paragraphs and 5-8 relevant hashtags."
             }.get(platform.lower(), "Create platform-appropriate social media content.")
 
-            # Define research task
+            # Define research task with conditional website scraping
+            website_instruction = ""
+            if self.has_website_data:
+                website_instruction = f"""
+                WEBSITE SCRAPING AVAILABLE: Use the website scraping tool to gather specific ingredient and menu information from: {self.website_url}
+                - Look for ingredient lists, menu items, product descriptions
+                - Extract specific natural ingredients mentioned on the website
+                - Find any health benefits or product claims mentioned
+                - Note the language style used on the website for consistency
+                """
+            else:
+                website_instruction = """
+                NO WEBSITE DATA AVAILABLE: Use your general knowledge of natural ingredients and industry best practices.
+                - Focus on commonly known natural ingredients (turmeric, ginger, honey, green tea, etc.)
+                - Use general health and wellness knowledge for this industry
+                - Apply standard natural product benefits and language
+                """
+
             research_task = Task(
                 description=f"""
                 Research the client's business, industry, and topic for a {platform} post.
@@ -662,7 +689,7 @@ class ContentCrewService:
                 - Target Audience: {client_info.target_audience}
                 - Brand Voice: {client_info.brand_voice}
 
-                If a website URL is provided, scrape it for information: {getattr(client_info, 'website_url', 'N/A')}
+                {website_instruction}
 
                 Research current trends on {platform} related to: {topic}
                 Identify popular hashtags and engagement patterns for this topic on {platform}.
@@ -674,9 +701,35 @@ class ContentCrewService:
                 output_file="social_research.txt"
             )
 
-            # Define writing task
-            writing_task = Task(
-                description=f"""
+            # Define writing task with enhanced Instagram hashtag requirements
+            if platform.lower() == "instagram":
+                writing_description = f"""
+                Create an Instagram post about {topic} based on the research.
+
+                {platform_guidance}
+
+                SPECIFIC INSTAGRAM REQUIREMENTS:
+                1. Write in the client's brand voice: {client_info.brand_voice}
+                2. Target the specific audience: {client_info.target_audience}
+                3. Use a {tone or "engaging"} tone
+                4. Keep the main content to approximately {word_count or 100} words
+                5. Include a clear call-to-action
+                6. MANDATORY: End with 8-15 relevant hashtags
+
+                HASHTAG REQUIREMENTS:
+                - Include popular health/wellness hashtags: #health #wellness #natural #healthylifestyle
+                - Include industry-specific hashtags related to {client_info.industry}
+                - Include topic-specific hashtags related to {topic}
+                - Use a mix of popular and niche hashtags
+                - Format hashtags at the end, each on a new line or separated by spaces
+                - Example format:
+
+                  #health #wellness #natural #ayurveda #herbalremedy #naturalhealing #healthylife #organic #plantbased #holistichealth
+
+                Do NOT include any visual suggestions in the main content.
+                """
+            else:
+                writing_description = f"""
                 Create a {platform} post about {topic} based on the research.
 
                 {platform_guidance}
@@ -691,9 +744,12 @@ class ContentCrewService:
 
                 Format the content appropriately for {platform}.
                 Do NOT include any visual suggestions in the main content.
-                """,
+                """
+
+            writing_task = Task(
+                description=writing_description,
                 agent=writer,
-                expected_output=f"Complete {platform} post",
+                expected_output=f"Complete {platform} post with hashtags",
                 context=[research_task],
                 output_file="social_content.txt"
             )

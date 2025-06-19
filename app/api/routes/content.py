@@ -87,14 +87,32 @@ async def generate_content(
             # Use direct function call instead of run_in_executor for debugging
             from app.services.crew_service import ContentCrewService
             crew_service = ContentCrewService()
-            result = crew_service.generate_blog_post(
-                client_info, 
-                topic,
-                content_type.lower(),
-                word_count,
-                tone,
-                keywords
-            )
+
+            # Check if this is a social media post that needs special handling
+            social_media_types = ['instagram', 'twitter', 'linkedin', 'facebook', 'social']
+
+            if content_type.lower() in social_media_types:
+                print(f"Generating social media content for platform: {content_type}")
+                # Use the specialized social media generation method
+                result = crew_service.generate_social_media_post(
+                    client_info,
+                    topic,
+                    platform=content_type.lower(),
+                    word_count=word_count or 100,  # Default to 100 words for social media
+                    tone=tone,
+                    keywords=keywords
+                )
+            else:
+                print(f"Generating standard content for type: {content_type}")
+                # Use the standard blog post generation method
+                result = crew_service.generate_blog_post(
+                    client_info,
+                    topic,
+                    content_type.lower(),
+                    word_count,
+                    tone,
+                    keywords
+                )
             
             print(f"Content generation completed for ID: {content.id}")
             print(f"Result preview: {result[:200]}...")
@@ -554,16 +572,33 @@ async def test_generate_content(
     # Generate content directly (will block)
     from app.services.crew_service import ContentCrewService
     crew_service = ContentCrewService()
-    
+
     try:
-        result = crew_service.generate_blog_post(
-            client_info, 
-            topic,
-            content_type.lower(),
-            word_count,
-            tone,
-            keywords
-        )
+        # Check if this is a social media post that needs special handling
+        social_media_types = ['instagram', 'twitter', 'linkedin', 'facebook', 'social']
+
+        if content_type.lower() in social_media_types:
+            print(f"Generating social media content for platform: {content_type}")
+            # Use the specialized social media generation method
+            result = crew_service.generate_social_media_post(
+                client_info,
+                topic,
+                platform=content_type.lower(),
+                word_count=word_count or 100,  # Default to 100 words for social media
+                tone=tone,
+                keywords=keywords
+            )
+        else:
+            print(f"Generating standard content for type: {content_type}")
+            # Use the standard blog post generation method
+            result = crew_service.generate_blog_post(
+                client_info,
+                topic,
+                content_type.lower(),
+                word_count,
+                tone,
+                keywords
+            )
         
         return {"result": result}
     except Exception as e:
