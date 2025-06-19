@@ -3,12 +3,12 @@ fastapi==0.115.0
 uvicorn==0.27.1
 starlette==0.38.6
 
-# Pydantic and settings (v2 compatible)
+# Pydantic v2 and settings
 pydantic==2.6.1
 pydantic-core==2.16.2
 pydantic-settings==2.1.0
 
-# Environment variables
+# Environment
 python-dotenv==1.0.0
 
 # Database
@@ -16,18 +16,18 @@ sqlalchemy==2.0.27
 psycopg2-binary==2.9.9
 alembic==1.13.1
 
-# AI/ML — UPDATED for pydantic v2 support
+# AI/ML - Compatible with Python 3.12
 google-generativeai==0.3.2
-crewai==0.28.5
-langchain==0.1.48           # 
-langchain-core==0.1.77       #
-langchain-google-genai==0.0.11
-langchain-community==0.0.66
+crewai==0.29.3
+langchain==0.2.3            # Compatible with Python 3.12 & Pydantic v2
+langchain-core==0.1.94
+langchain-google-genai==0.0.16
+langchain-community==0.0.56
 
 # HTTP and utilities
 requests==2.31.0
 beautifulsoup4==4.12.2
 tenacity==8.5.0
 
-# Authentication and security
+# Auth
 PyJWT==2.8.0
