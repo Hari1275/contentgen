@@ -25,8 +25,14 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 
 # Initialize database on startup
 @app.on_event("startup")
-def startup_event():
-    init_db()
+async def startup_event():
+    try:
+        init_db()
+        print("Database initialized successfully")
+    except Exception as e:
+        print(f"Warning: Database initialization failed: {e}")
+        # Don't fail the startup, just log the error
+        pass
 
 @app.get("/")
 def read_root():
