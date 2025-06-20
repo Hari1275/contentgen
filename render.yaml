@@ -2,16 +2,19 @@ services:
   - type: web
     name: smart-ai-backend
     runtime: python
-    buildCommand: pip install -r requirements.txt && pip install -e .
-    startCommand: gunicorn app.main:app --worker-class uvicorn.workers.UvicornWorker
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app.main:app --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT
     envVars:
       - key: PYTHONPATH
         value: /opt/render/project/src
-    envVars:
       - key: DATABASE_URL
         value: ${DATABASE_URL}
       - key: SUPABASE_URL
         value: ${SUPABASE_URL}
       - key: SUPABASE_KEY
         value: ${SUPABASE_KEY}
+      - key: SUPABASE_DB_PASSWORD
+        value: ${SUPABASE_DB_PASSWORD}
+      - key: GEMINI_API_KEY
+        value: ${GEMINI_API_KEY}
         
