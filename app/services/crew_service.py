@@ -15,7 +15,6 @@ try:
     CREWAI_TOOLS_AVAILABLE = True
 except ImportError:
     CREWAI_TOOLS_AVAILABLE = False
-    print("Warning: crewai_tools not installed. Some functionality may be limited.")
 
 class ContentCrewService:
     def __init__(self):
@@ -27,13 +26,10 @@ class ContentCrewService:
                 self.llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=settings.GEMINI_API_KEY)
                 # Test the API key with a simple query
                 response = self.model.generate_content("Hello")
-                print("Gemini API initialized successfully")
             except Exception as e:
-                print(f"Error initializing Gemini API: {str(e)}")
                 self.model = None
                 self.llm = None
         else:
-            print("Warning: GEMINI_API_KEY not set in environment variables")
             self.model = None
             self.llm = None
 
@@ -55,10 +51,7 @@ class ContentCrewService:
                 # Initialize the tool with the website URL
                 scrape_tool = ScrapeWebsiteTool(website_url=client_info.website_url)
                 tools.append(scrape_tool)
-                print(f"✅ Website scraping ENABLED - Added ScrapeWebsiteTool for URL: {client_info.website_url}")
-                print("🔍 Content generation will include ingredient/menu information from client website")
             except ImportError:
-                print("Warning: crewai_tools not installed. Falling back to langchain Tool.")
                 from langchain.tools import Tool
 
                 scrape_tool = Tool(
@@ -67,11 +60,6 @@ class ContentCrewService:
                     func=self._scrape_website
                 )
                 tools.append(scrape_tool)
-                print(f"✅ Website scraping ENABLED - Added langchain Tool for URL: {client_info.website_url}")
-                print("🔍 Content generation will include ingredient/menu information from client website")
-        else:
-            print("❌ Website scraping DISABLED - No website URL provided")
-            print("📝 Content generation will proceed with general ingredient knowledge only")
 
         # Store website availability for use in task descriptions
         self.has_website_data = has_website
@@ -146,7 +134,6 @@ class ContentCrewService:
     def _scrape_website(self, url):
         """Fallback method for website scraping when crewai_tools is not available"""
         try:
-            print(f"Scraping website: {url}")
             response = requests.get(url, headers={
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
             })
@@ -169,10 +156,8 @@ class ContentCrewService:
             if title:
                 extracted_text = f"TITLE: {title.get_text()}\n\n{extracted_text}"
 
-            print(f"Successfully scraped {len(extracted_text)} characters from {url}")
             return extracted_text
         except Exception as e:
-            print(f"Error scraping website {url}: {str(e)}")
             return f"Error scraping website: {str(e)}"
 
     def run_crew_ai(client_info, topic, content_type="blog", word_count=500, tone=None, keywords=None):
@@ -189,8 +174,6 @@ class ContentCrewService:
     def generate_blog_post(self, client_info, topic, content_type="blog", word_count=500, tone=None, keywords=None):
         """Generate content using CrewAI agents"""
         try:
-            print(f"Starting content generation for topic: {topic}")
-
             # Check if LLM is initialized
             if not self.llm:
                 return "Error: Gemini API key not configured. Please set GEMINI_API_KEY in your .env file."
@@ -367,37 +350,28 @@ class ContentCrewService:
                 manager_llm=self.llm  # Use the same LLM for the manager
             )
 
-            print("Starting crew kickoff")
             try:
                 result = crew.kickoff()
-                print("Crew kickoff completed")
-                print(f"Raw result preview: {result[:200]}...")
 
                 # Clean any emojis or special Unicode characters
                 result = self._clean_unicode_content(str(result))
-                print("Content cleaned of Unicode characters")
 
             except (ServiceUnavailable, ResourceExhausted) as e:
-                print(f"⚠️ Gemini API overloaded: {str(e)}")
-                print("🔄 Falling back to simple content generation...")
                 result = self._generate_fallback_content(client_info, topic, content_type, word_count, tone, keywords)
                 result += "\n\nVISUAL SUGGESTIONS:\nDue to API limitations, visual suggestions are not available at this time."
                 result = self._clean_unicode_content(result)
 
             # Check if we only got visual suggestions without content
             if result.startswith("VISUAL SUGGESTIONS:"):
-                print("ERROR: Only received visual suggestions without main content")
                 # Try to read content from output file
                 try:
                     with open("content.txt", "r") as f:
                         main_content = f.read()
                     result = main_content + "\n\n" + result
-                    print(f"Added content from file. New result preview: {result[:200]}...")
                 except:
                     # Generate main content separately as fallback
                     main_content = self._generate_fallback_content(client_info, topic, content_type, word_count, tone, keywords)
                     result = main_content + "\n\n" + result
-                    print(f"Added fallback content. New result preview: {result[:200]}...")
 
             # Ensure the result has both content and visual suggestions
             if "VISUAL SUGGESTIONS:" not in result:
@@ -417,12 +391,10 @@ class ContentCrewService:
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
-            print(f"Error in CrewAI content generation: {error_details}")
             return f"Error generating content: {str(e)}"
 
     def _generate_fallback_content(self, client_info, topic, content_type="blog", word_count=500, tone=None, keywords=None):
         """Generate fallback content when the crew approach fails"""
-        print(f"Generating fallback content for topic: {topic}")
 
         # Prepare keywords string
         keywords_str = ", ".join(keywords) if keywords and isinstance(keywords, list) else keywords or ""
@@ -483,10 +455,8 @@ class ContentCrewService:
             content = response.text
             # Clean any Unicode characters
             content = self._clean_unicode_content(content)
-            print(f"Fallback content generated. Preview: {content[:200]}...")
             return content
         except Exception as e:
-            print(f"Error generating fallback content: {str(e)}")
             # Return a very basic fallback as last resort
             return f"""
             {topic}
@@ -514,23 +484,16 @@ class ContentCrewService:
     )
     def _generate_with_retry(self, prompt):
         """Generate content with retry logic for handling API overload"""
-        print(f"🔄 Attempting content generation (with retry logic)...")
-
         # Add random delay to avoid hitting rate limits
         delay = random.uniform(1, 3)
-        print(f"⏱️ Adding {delay:.1f}s delay to avoid rate limits...")
         time.sleep(delay)
 
         try:
             response = self.model.generate_content(prompt)
-            print("✅ Content generation successful!")
             return response
         except (ServiceUnavailable, ResourceExhausted) as e:
-            print(f"⚠️ API overloaded (503/429): {str(e)}")
-            print("🔄 Will retry with exponential backoff...")
             raise  # Re-raise to trigger retry
         except Exception as e:
-            print(f"❌ Other error: {str(e)}")
             raise
 
     def _clean_unicode_content(self, content):
@@ -556,7 +519,6 @@ class ContentCrewService:
         # Also remove any other problematic characters
         cleaned_content = cleaned_content.encode('ascii', 'ignore').decode('ascii')
 
-        print(f"Cleaned content: removed {len(content) - len(cleaned_content)} problematic characters")
         return cleaned_content
 
     def _get_content_format_instructions(self, content_type):
@@ -637,8 +599,6 @@ class ContentCrewService:
     def generate_social_media_post(self, client_info, topic, platform="instagram", word_count=100, tone=None, keywords=None):
         """Generate social media content for specific platforms"""
         try:
-            print(f"Starting social media content generation for {platform} on topic: {topic}")
-
             # Check if LLM is initialized
             if not self.llm:
                 return "Error: Gemini API key not configured. Please set GEMINI_API_KEY in your .env file."
@@ -783,7 +743,6 @@ class ContentCrewService:
                 process=Process.sequential
             )
 
-            print(f"Starting crew kickoff for {platform} content")
             result = crew.kickoff()
 
             # Process and return the result
@@ -809,7 +768,6 @@ class ContentCrewService:
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
-            print(f"Error in social media content generation: {error_details}")
             return f"Error generating social media content: {str(e)}"
 
 

@@ -39,15 +39,9 @@ def read_clients(
     current_user: SupabaseUser = Depends(get_current_active_user)
 ):
     """Get all clients for the authenticated user"""
-    print(f"🔍 Debug: Getting clients for user {current_user.id}")
-
     clients = db.query(Client).filter(
         Client.user_id == current_user.id
     ).offset(skip).limit(limit).all()
-
-    print(f"📋 Found {len(clients)} clients for user {current_user.id}")
-    for client in clients:
-        print(f"  - Client {client.id}: {client.name}")
 
     return clients
 

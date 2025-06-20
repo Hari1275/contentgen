@@ -28,9 +28,7 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 async def startup_event():
     try:
         init_db()
-        print("Database initialized successfully")
     except Exception as e:
-        print(f"Warning: Database initialization failed: {e}")
         # Don't fail the startup, just log the error
         pass
 

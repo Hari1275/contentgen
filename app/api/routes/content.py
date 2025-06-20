@@ -82,8 +82,6 @@ async def generate_content(
     # Run CrewAI in a background task
     async def generate_in_background():
         try:
-            print(f"Starting background task for content ID: {content.id}")
-            
             # Use direct function call instead of run_in_executor for debugging
             from app.services.crew_service import ContentCrewService
             crew_service = ContentCrewService()
@@ -92,7 +90,6 @@ async def generate_content(
             social_media_types = ['instagram', 'twitter', 'linkedin', 'facebook', 'social']
 
             if content_type.lower() in social_media_types:
-                print(f"Generating social media content for platform: {content_type}")
                 # Use the specialized social media generation method
                 result = crew_service.generate_social_media_post(
                     client_info,
@@ -103,7 +100,6 @@ async def generate_content(
                     keywords=keywords
                 )
             else:
-                print(f"Generating standard content for type: {content_type}")
                 # Use the standard blog post generation method
                 result = crew_service.generate_blog_post(
                     client_info,
@@ -114,9 +110,6 @@ async def generate_content(
                     keywords
                 )
             
-            print(f"Content generation completed for ID: {content.id}")
-            print(f"Result preview: {result[:200]}...")
-            
             # Process the result to separate content and visual suggestions
             if "VISUAL SUGGESTIONS:" in result:
                 content_parts = result.split("VISUAL SUGGESTIONS:", 1)  # Split only on first occurrence
@@ -126,12 +119,8 @@ async def generate_content(
                 main_content = result.strip()
                 visual_suggestions = "No specific visual suggestions provided."
             
-            print(f"Main content preview: {main_content[:200]}...")
-            print(f"Visual suggestions preview: {visual_suggestions[:100]}...")
-            
             # If main_content is empty, use a fallback
             if not main_content:
-                print("WARNING: Main content is empty, using fallback content")
                 main_content = f"""
                 {topic}
                 
@@ -188,7 +177,6 @@ async def generate_content(
             
             # If body is still empty after all attempts, use a fallback
             if not body:
-                print("WARNING: Body is still empty after processing, using fallback body")
                 body = f"""
                 Are you tired of allergies disrupting your daily life? Nishamritha Tablets offer a natural, Ayurvedic solution to provide lasting relief from allergy symptoms.
                 
@@ -207,10 +195,6 @@ async def generate_content(
                 Try Nishamritha Tablets today and experience the freedom of living without allergy constraints.
                 """
             
-            print(f"Extracted title: {title}")
-            print(f"Body length: {len(body)}")
-            print(f"Body preview: {body[:200]}...")
-            
             # Get a new session since we're in a background task
             from app.db.database import SessionLocal
             db = SessionLocal()
@@ -224,17 +208,11 @@ async def generate_content(
                     content_obj.visual_suggestions = visual_suggestions
                     content_obj.updated_at = datetime.now()
                     db.commit()
-                    print(f"Database updated for content ID: {content.id}")
-                    print(f"Final title: {title}")
-                    print(f"Final body length: {len(body)}")
-                else:
-                    print(f"Content ID {content.id} not found in database")
             finally:
                 db.close()
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
-            print(f"Error in background task: {error_details}")
             
             # Update content with error message
             from app.db.database import SessionLocal
@@ -247,13 +225,11 @@ async def generate_content(
                     content_obj.status = DBContentStatus.REVIEW
                     content_obj.updated_at = datetime.now()
                     db.commit()
-                    print(f"Error status updated for content ID: {content.id}")
             finally:
                 db.close()
     
     # Start the background task
     background_tasks.add_task(generate_in_background)
-    print(f"Background task added for content ID: {content.id}")
     
     return {
         "message": "Content generation started", 
@@ -290,24 +266,14 @@ def get_content_by_client(
     current_user: SupabaseUser = Depends(get_current_active_user)
 ):
     """Get all content for a specific client (only if owned by authenticated user)"""
-    print(f"🔍 Debug: Looking for client {client_id}")
-    print(f"👤 Current user ID: {current_user.id}")
-
     # First, check if client exists at all
     client_exists = db.query(Client).filter(Client.id == client_id).first()
     if not client_exists:
-        print(f"❌ Client {client_id} does not exist in database")
         raise HTTPException(status_code=404, detail="Client not found")
-
-    print(f"✅ Client {client_id} exists")
-    print(f"📋 Client details: name='{client_exists.name}', user_id='{client_exists.user_id}'")
 
     # Check if client belongs to the authenticated user
     if client_exists.user_id != current_user.id:
-        print(f"❌ Access denied: Client belongs to user '{client_exists.user_id}', but current user is '{current_user.id}'")
         raise HTTPException(status_code=404, detail="Client not found or access denied")
-
-    print(f"✅ User {current_user.id} owns client {client_id}")
 
     # Check if client exists and belongs to the authenticated user
     db_client = db.query(Client).filter(
@@ -495,7 +461,6 @@ def debug_database_state(db: Session = Depends(get_db)):
 
     # Check all clients
     all_clients = db.query(Client).all()
-    print(f"📊 Total clients in database: {len(all_clients)}")
 
     clients_info = []
     for client in all_clients:
@@ -505,11 +470,9 @@ def debug_database_state(db: Session = Depends(get_db)):
             "user_id": getattr(client, 'user_id', 'NO_USER_ID'),
             "has_user_id": hasattr(client, 'user_id') and client.user_id is not None
         })
-        print(f"  - Client {client.id}: {client.name}, user_id: {getattr(client, 'user_id', 'NO_USER_ID')}")
 
     # Check all content
     all_content = db.query(Content).all()
-    print(f"📊 Total content in database: {len(all_content)}")
 
     content_info = []
     for content in all_content:
@@ -522,7 +485,6 @@ def debug_database_state(db: Session = Depends(get_db)):
             "client_exists": client_exists is not None,
             "client_user_id": getattr(client_exists, 'user_id', None) if client_exists else None
         })
-        print(f"  - Content {content.id}: client_id={content.client_id}, client_exists={client_exists is not None}")
 
     return {
         "clients": clients_info,
@@ -578,7 +540,6 @@ async def test_generate_content(
         social_media_types = ['instagram', 'twitter', 'linkedin', 'facebook', 'social']
 
         if content_type.lower() in social_media_types:
-            print(f"Generating social media content for platform: {content_type}")
             # Use the specialized social media generation method
             result = crew_service.generate_social_media_post(
                 client_info,
@@ -589,7 +550,6 @@ async def test_generate_content(
                 keywords=keywords
             )
         else:
-            print(f"Generating standard content for type: {content_type}")
             # Use the standard blog post generation method
             result = crew_service.generate_blog_post(
                 client_info,
@@ -608,15 +568,3 @@ async def test_generate_content(
             status_code=500, 
             detail=f"Error generating content: {str(e)}\n\n{error_details}"
         )
-
-
-
-
-
-
-
-
-
-
-
-

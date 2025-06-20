@@ -39,24 +39,19 @@ class Settings(BaseSettings):
                 project_id = self.SUPABASE_URL.replace("https://", "").replace(".supabase.co", "")
                 # Build database URL
                 self.DATABASE_URL = f"postgresql://postgres:{self.SUPABASE_DB_PASSWORD}@db.{project_id}.supabase.co:5432/postgres"
-                print(f"Configured Supabase database connection for project: {project_id}")
             except Exception as e:
-                print(f"Warning: Could not configure Supabase database URL: {e}")
+                pass
         
         # Validate required settings
         if not self.DATABASE_URL:
-            print("ERROR: DATABASE_URL not configured")
             raise ValueError("DATABASE_URL is required")
         
         # Configure Gemini API if available
         if self.GEMINI_API_KEY:
             try:
                 genai.configure(api_key=self.GEMINI_API_KEY)
-                print("Gemini API configured successfully")
             except Exception as e:
-                print(f"Warning: Could not configure Gemini API: {e}")
-        else:
-            print("Warning: GEMINI_API_KEY not set - content generation features will be limited")
+                pass
 
     model_config = {
         "env_file": ".env",

@@ -221,8 +221,7 @@ class MemoryService:
                 return suggestions
                 
             except Exception as parsing_error:
-                print(f"Error parsing AI response: {str(parsing_error)}")
-                # Fallback to generated suggestions with hashtags
+                                # Fallback to generated suggestions with hashtags
                 industry_tag = context['client']['industry'].lower().replace(' ', '')
                 return [
                     {
@@ -243,7 +242,6 @@ class MemoryService:
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
-            print(f"Error generating suggestions: {error_details}")
             return [{"error": f"Failed to generate suggestions: {str(e)}"}]
 
 

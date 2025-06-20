@@ -40,13 +40,7 @@ def verify_supabase_token(token: str) -> Optional[SupabaseUser]:
         user_id = payload.get("sub")
         email = payload.get("email")
 
-        # Debug logging
-        print(f"🔍 JWT Payload: {payload}")
-        print(f"👤 User ID: {user_id}")
-        print(f"📧 Email: {email}")
-
         if not user_id:
-            print("❌ No user ID found in token")
             return None
 
         # Create a clean payload without conflicting keys
@@ -59,22 +53,16 @@ def verify_supabase_token(token: str) -> Optional[SupabaseUser]:
         )
 
     except jwt.ExpiredSignatureError as e:
-        print(f"❌ Token expired: {e}")
         return None
     except jwt.InvalidTokenError as e:
-        print(f"❌ Invalid token: {e}")
         return None
     except Exception as e:
-        print(f"❌ Token verification error: {e}")
         return None
 
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ) -> SupabaseUser:
     """Get the current authenticated user from Supabase token"""
-    print(f"🔑 Received token: {credentials.credentials[:50]}...")
-    print(f"🔐 JWT Secret configured: {'Yes' if SUPABASE_JWT_SECRET else 'No'}")
-
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -82,7 +70,6 @@ def get_current_user(
     )
 
     if not SUPABASE_JWT_SECRET:
-        print("❌ SUPABASE_JWT_SECRET not configured!")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Server configuration error: JWT secret not set"
@@ -92,10 +79,8 @@ def get_current_user(
     user = verify_supabase_token(token)
 
     if user is None:
-        print("❌ Token verification failed")
         raise credentials_exception
 
-    print(f"✅ User authenticated: {user.email}")
     return user
 
 def get_current_active_user(current_user: SupabaseUser = Depends(get_current_user)) -> SupabaseUser:
