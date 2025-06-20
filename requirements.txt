@@ -1,6 +1,7 @@
 # Core web framework
 fastapi
 uvicorn
+gunicorn==21.2.0
 starlette
 
 # Pydantic and settings

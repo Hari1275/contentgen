@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: smart-ai-backend
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app.main:app --worker-class uvicorn.workers.UvicornWorker
+    envVars:
+      - key: DATABASE_URL
+        value: ${DATABASE_URL}
+      - key: SUPABASE_URL
+        value: ${SUPABASE_URL}
+      - key: SUPABASE_KEY
+        value: ${SUPABASE_KEY}
+  
+  - type: web
+    name: smart-ai-frontend
+    runtime: node
+    buildCommand: cd learning-objectives && npm install && npm run build
+    startCommand: cd learning-objectives && npm start
+    staticPath: learning-objectives/out
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        value: ${BACKEND_URL}
