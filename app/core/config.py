@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Smart AI Content Generator"
 
     # Database settings
-    DATABASE_URL: Optional[str] = os.getenv("DATABASE_URL")
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 
     # Supabase settings
     SUPABASE_URL: Optional[str] = os.getenv("SUPABASE_URL")
@@ -32,31 +32,31 @@ class Settings(BaseSettings):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         
-        # Build database URL from Supabase credentials if DATABASE_URL not provided
-        if not self.DATABASE_URL:
-            if self.SUPABASE_URL and self.SUPABASE_DB_PASSWORD:
-                try:
-                    # Extract project ID from Supabase URL
-                    project_id = self.SUPABASE_URL.replace("https://", "").replace(".supabase.co", "")
-                    # Build database URL
-                    self.DATABASE_URL = f"postgresql://postgres:{self.SUPABASE_DB_PASSWORD}@db.{project_id}.supabase.co:5432/postgres"
-                except Exception as e:
-                    pass
+        # Only configure database if not already set via DATABASE_URL
+        if not self.DATABASE_URL and self.SUPABASE_URL and self.SUPABASE_DB_PASSWORD:
+            try:
+                # Extract project ID from Supabase URL
+                project_id = self.SUPABASE_URL.replace("https://", "").replace(".supabase.co", "")
+                # Build database URL
+                self.DATABASE_URL = f"postgresql://postgres:{self.SUPABASE_DB_PASSWORD}@db.{project_id}.supabase.co:5432/postgres"
+                print(f"Configured Supabase database connection for project: {project_id}")
+            except Exception as e:
+                print(f"Warning: Could not configure Supabase database URL: {e}")
         
         # Validate required settings
         if not self.DATABASE_URL:
-            raise ValueError("DATABASE_URL is required. Please set DATABASE_URL environment variable or provide SUPABASE_URL and SUPABASE_DB_PASSWORD.")
-        
-        # Ensure we're not using SQLite
-        if self.DATABASE_URL.startswith('sqlite'):
-            raise ValueError("SQLite is not supported. Please use PostgreSQL/Supabase database.")
+            print("ERROR: DATABASE_URL not configured")
+            raise ValueError("DATABASE_URL is required")
         
         # Configure Gemini API if available
         if self.GEMINI_API_KEY:
             try:
                 genai.configure(api_key=self.GEMINI_API_KEY)
+                print("Gemini API configured successfully")
             except Exception as e:
-                pass
+                print(f"Warning: Could not configure Gemini API: {e}")
+        else:
+            print("Warning: GEMINI_API_KEY not set - content generation features will be limited")
 
     model_config = {
         "env_file": ".env",

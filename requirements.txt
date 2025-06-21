@@ -1,37 +1,36 @@
 # Core web framework
-fastapi
-uvicorn
-gunicorn==21.2.0
-starlette
+fastapi==0.115.0
+uvicorn==0.27.1
+starlette==0.38.6
 
 # Pydantic and settings
-pydantic
-pydantic-core
-pydantic-settings
+pydantic==2.6.1
+pydantic-core==2.16.2
+pydantic-settings==2.1.0
 
 # Environment variables
-python-dotenv
+python-dotenv==1.0.0
 
 # Database
-sqlalchemy
-psycopg2-binary
-alembic
+sqlalchemy==2.0.27
+psycopg2-binary==2.9.9
+alembic==1.13.1
 
 # AI/ML
-google-generativeai
-crewai
-langchain
-langchain-core
-langchain-google-genai
-langchain-community
+google-generativeai==0.3.2
+crewai==0.28.5
+langchain==0.1.20
+langchain-core==0.1.53
+langchain-google-genai==0.0.6
+langchain-community==0.0.38
 
 # HTTP and utilities
-requests
-beautifulsoup4
-tenacity
+requests==2.31.0
+beautifulsoup4==4.12.2
+tenacity==8.5.0
 
 # Authentication and security (for Supabase JWT verification)
-PyJWT
+PyJWT==2.8.0
 
 
 
